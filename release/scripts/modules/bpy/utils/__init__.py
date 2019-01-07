@@ -35,6 +35,7 @@ __all__ = (
     "refresh_script_paths",
     "app_template_paths",
     "register_class",
+    "register_module",
     "register_manual_map",
     "unregister_manual_map",
     "register_classes_factory",
@@ -50,6 +51,7 @@ __all__ = (
     "smpte_from_seconds",
     "units",
     "unregister_class",
+    "unregister_module",
     "user_resource",
     "execfile",
 )
@@ -178,6 +180,10 @@ def load_scripts(reload_scripts=False, refresh_scripts=False):
         # its not perfect.
         for module_name in [ext.module for ext in _preferences.addons]:
             _addon_utils.disable(module_name)
+
+        # *AFTER* unregistering all add-ons, otherwise all calls to
+        # unregister_module() will silently fail (do nothing).
+        _bpy_types.TypeMap.clear()
 
     def register_module_call(mod):
         register = getattr(mod, "register", None)
@@ -656,6 +662,85 @@ def user_resource(resource_type, path="", create=False):
                 target_path = ""
 
     return target_path
+
+
+def _bpy_module_classes(module, is_registered=False):
+    typemap_list = _bpy_types.TypeMap.get(module, ())
+    i = 0
+    while i < len(typemap_list):
+        cls_weakref = typemap_list[i]
+        cls = cls_weakref()
+
+        if cls is None:
+            del typemap_list[i]
+        else:
+            if is_registered == cls.is_registered:
+                yield cls
+            i += 1
+
+
+def register_module(module, verbose=False):
+    if verbose:
+        print("bpy.utils.register_module(%r): ..." % module)
+
+    # Always print this text
+    if True:
+        print("# bpy.utils.register_module is deprecated! replace code with this:")
+        mod_prev = None
+        ls = list(_bpy_module_classes(module, is_registered=False))
+        ls.sort(key=lambda cls: cls.__module__)
+        for cls in ls:
+            if mod_prev != cls.__module__:
+                if mod_prev is not None:
+                    print(")\n")
+                print("#", cls.__module__.replace(".", "/") + ".py")
+                print("classes = (")
+                mod_prev = cls.__module__
+            print("    %s," % cls.__name__)
+        print(")\n")
+        print("def register():")
+        print("    from bpy.utils import register_class")
+        print("    for cls in classes:")
+        print("        register_class(cls)")
+        print("\n")
+        print("def unregister():")
+        print("    from bpy.utils import unregister_class")
+        print("    for cls in classes:")
+        print("        unregister_class(cls)")
+        print("\n")
+
+    cls = None
+    for cls in _bpy_module_classes(module, is_registered=False):
+        if verbose:
+            print("    %r" % cls)
+        try:
+            register_class(cls)
+        except:
+            print("bpy.utils.register_module(): "
+                  "failed to registering class %r" % cls)
+            import traceback
+            traceback.print_exc()
+    if verbose:
+        print("done.\n")
+    if cls is None:
+        raise Exception("register_module(%r): defines no classes" % module)
+
+
+def unregister_module(module, verbose=False):
+    if verbose:
+        print("bpy.utils.unregister_module(%r): ..." % module)
+    for cls in _bpy_module_classes(module, is_registered=True):
+        if verbose:
+            print("    %r" % cls)
+        try:
+            unregister_class(cls)
+        except:
+            print("bpy.utils.unregister_module(): "
+                  "failed to unregistering class %r" % cls)
+            import traceback
+            traceback.print_exc()
+    if verbose:
+        print("done.\n")
 
 
 def register_classes_factory(classes):
